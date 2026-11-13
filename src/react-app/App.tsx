@@ -1,66 +1,166 @@
-// src/App.tsx
+import { useEffect, useState } from "react";
+import { loadPrefs, savePrefs, type AppPrefs } from "./lib/storage";
+import { BuilderPage } from "./pages/BuilderPage";
+import { CheatSheetPage } from "./pages/CheatSheetPage";
+import { DetectivePage } from "./pages/DetectivePage";
+import { HomePage } from "./pages/HomePage";
+import { PosPage } from "./pages/PosPage";
+import { PracticePage } from "./pages/PracticePage";
+import { StructurePage } from "./pages/StructurePage";
+import { TenseDetailPage } from "./pages/TenseDetailPage";
+import { TensesPage } from "./pages/TensesPage";
 
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
-import cloudflareLogo from "./assets/Cloudflare_Logo.svg";
-import honoLogo from "./assets/hono.svg";
-import "./App.css";
-
-function App() {
-	const [count, setCount] = useState(0);
-	const [name, setName] = useState("unknown");
-
-	return (
-		<>
-			<div>
-				<a href="https://vite.dev" target="_blank">
-					<img src={viteLogo} className="logo" alt="Vite logo" />
-				</a>
-				<a href="https://react.dev" target="_blank">
-					<img src={reactLogo} className="logo react" alt="React logo" />
-				</a>
-				<a href="https://hono.dev/" target="_blank">
-					<img src={honoLogo} className="logo cloudflare" alt="Hono logo" />
-				</a>
-				<a href="https://workers.cloudflare.com/" target="_blank">
-					<img
-						src={cloudflareLogo}
-						className="logo cloudflare"
-						alt="Cloudflare logo"
-					/>
-				</a>
-			</div>
-			<h1>Vite + React + Hono + Cloudflare</h1>
-			<div className="card">
-				<button
-					onClick={() => setCount((count) => count + 1)}
-					aria-label="increment"
-				>
-					count is {count}
-				</button>
-				<p>
-					Edit <code>src/App.tsx</code> and save to test HMR
-				</p>
-			</div>
-			<div className="card">
-				<button
-					onClick={() => {
-						fetch("/api/")
-							.then((res) => res.json() as Promise<{ name: string }>)
-							.then((data) => setName(data.name));
-					}}
-					aria-label="get name"
-				>
-					Name from API is: {name}
-				</button>
-				<p>
-					Edit <code>worker/index.ts</code> to change the name
-				</p>
-			</div>
-			<p className="read-the-docs">Click on the logos to learn more</p>
-		</>
-	);
+interface Route {
+  path: string;
+  anchor?: string;
 }
 
-export default App;
+function parseHash(): Route {
+  const raw = window.location.hash.replace(/^#/, "") || "/";
+  // Support #/pos#verb
+  const hashIdx = raw.indexOf("#");
+  if (hashIdx >= 0) {
+    return { path: raw.slice(0, hashIdx) || "/", anchor: raw.slice(hashIdx + 1) };
+  }
+  return { path: raw };
+}
+
+const NAV = [
+  { href: "#/", label: "Map", match: (p: string) => p === "/" },
+  { href: "#/structure", label: "Structure", match: (p: string) => p === "/structure" },
+  { href: "#/pos", label: "Parts of Speech", match: (p: string) => p === "/pos" },
+  { href: "#/tenses", label: "12 Tenses", match: (p: string) => p.startsWith("/tenses") },
+  { href: "#/detective", label: "Detective", match: (p: string) => p === "/detective" },
+  { href: "#/builder", label: "Builder", match: (p: string) => p === "/builder" },
+  { href: "#/practice", label: "Practice", match: (p: string) => p === "/practice" },
+  { href: "#/cheatsheet", label: "Cheat Sheet", match: (p: string) => p === "/cheatsheet" },
+];
+
+export function App() {
+  const [route, setRoute] = useState<Route>(parseHash);
+  const [prefs, setPrefs] = useState<AppPrefs>(loadPrefs);
+
+  useEffect(() => {
+    const onHash = () => setRoute(parseHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", prefs.theme);
+    savePrefs(prefs);
+  }, [prefs]);
+
+  useEffect(() => {
+    if (route.anchor) {
+      const el = document.getElementById(route.anchor);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.scrollTo({ top: 0 });
+    }
+  }, [route]);
+
+  const toggleTheme = () =>
+    setPrefs((p) => ({ ...p, theme: p.theme === "light" ? "dark" : "light" }));
+
+  const toggleRoles = () =>
+    setPrefs((p) => ({ ...p, showRoles: !p.showRoles }));
+
+  const toggleMastered = (id: string) =>
+    setPrefs((p) => ({
+      ...p,
+      mastered: p.mastered.includes(id)
+        ? p.mastered.filter((m) => m !== id)
+        : [...p.mastered, id],
+    }));
+
+  const recordQuizScore = (correct: number, total: number) =>
+    setPrefs((p) => {
+      const best = p.quizBest;
+      const better = total > 0 && (correct > best.correct || (correct === best.correct && total < best.total));
+      return better ? { ...p, quizBest: { correct, total } } : p;
+    });
+
+  const { path } = route;
+
+  let page;
+  if (path === "/") {
+    page = <HomePage mastered={prefs.mastered} showTags={prefs.showRoles} />;
+  } else if (path === "/structure") {
+    page = <StructurePage showTags={prefs.showRoles} />;
+  } else if (path === "/pos") {
+    page = <PosPage showTags={prefs.showRoles} />;
+  } else if (path === "/tenses") {
+    page = <TensesPage mastered={prefs.mastered} onToggleMastered={toggleMastered} />;
+  } else if (path.startsWith("/tenses/")) {
+    const id = path.slice("/tenses/".length);
+    page = (
+      <TenseDetailPage
+        tenseId={id}
+        showTags={prefs.showRoles}
+        mastered={prefs.mastered}
+        onToggleMastered={toggleMastered}
+      />
+    );
+  } else if (path === "/detective") {
+    page = <DetectivePage />;
+  } else if (path === "/builder") {
+    page = <BuilderPage showTags={prefs.showRoles} />;
+  } else if (path === "/practice") {
+    page = <PracticePage quizBest={prefs.quizBest} onScore={recordQuizScore} />;
+  } else if (path === "/cheatsheet") {
+    page = <CheatSheetPage />;
+  } else {
+    page = <HomePage mastered={prefs.mastered} showTags={prefs.showRoles} />;
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="topbar-inner">
+          <a href="#/" className="brand">
+            <span aria-hidden="true">🗺️</span>
+            <span>Grammar Me</span>
+          </a>
+
+          <nav className="nav-links" aria-label="Main navigation">
+            {NAV.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                className={`nav-link ${item.match(path) ? "active" : ""}`}
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
+
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className={`btn sm ${prefs.showRoles ? "active" : ""}`}
+              onClick={toggleRoles}
+              title="Show Part-of-Speech / Role labels below highlighted words"
+            >
+              POS Tags: {prefs.showRoles ? "ON" : "OFF"}
+            </button>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={toggleTheme}
+              title="Switch light / dark theme"
+            >
+              {prefs.theme === "light" ? "🌙 Dark" : "☀️ Light"}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="main-container">{page}</main>
+
+      <footer className="footer">
+        Grammar Me — Daily-life English grammar reference &amp; practice. Everything runs locally in your browser.
+      </footer>
+    </div>
+  );
+}
